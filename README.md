@@ -14,3 +14,19 @@ A specialized toolkit for Next.js projects to audit code structure, generate AI 
 2. Install dependencies:
    ```bash
    npm install
+
+   - ajouter dans globals.css
+
+   @source "../../node_modules/next-devtools-kit/app/**/*.{ts,tsx}";
+
+   - ajouter dans tsconfig.json dans paths 
+
+   "next-devtools-kit/*": ["./node_modules/next-devtools-kit/*"]
+
+   - ajouter dans tailwind.config.ts dans content (pas sur que le fichier est necessaire)
+
+   "./node_modules/next-devtools-kit/app/**/*.{js,ts,jsx,tsx}", 
+
+   ajouter dans package.json le script 
+
+   "audit": "node node_modules/next-devtools-kit/scripts/analyze_structure.js"
