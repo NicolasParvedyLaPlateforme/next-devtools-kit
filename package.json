@@ -10,7 +10,9 @@
     ".": "./index.ts",
     "./api/*": "./app/api/*.ts",
     "./devtools/*": "./app/devtools/*.tsx",
-    "./scripts/*": "./scripts/*.js"
+    "./scripts/*": "./scripts/*.js",
+    "./app/*": "./app/*",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "dev": "next dev",
