@@ -3,25 +3,40 @@ const fs = require('fs');
 const path = require('path');
 
 // --- CONFIGURATION ---
-// [TAG:CONFIG] Vérifie bien que ce dossier 'app' existe à la racine d'où tu lances la commande
-const TARGET_FOLDER = 'app'; 
 const OUTPUT_ROOT = 'devtools_data/composition';
 
-// [TAG:LOGIC_FOLDER_NAME] Correction: Comportement par défaut = Date (comme Meurise)
-function getOutputFolder() {
-    const arg = process.argv[2];
+/**
+ * Détermine dynamiquement si on analyse 'src/app' ou 'app'
+ */
+function getTargetFolder() {
+    const root = process.cwd();
+    // Priorité au dossier src/app (Standard Next.js récent)
+    if (fs.existsSync(path.join(root, 'src', 'app'))) {
+        return 'src/app';
+    }
+    return 'app';
+}
 
-    // Si on lance "node script.js v1.0" -> retourne "v1.0"
-    if (arg && arg !== 'save') {
-        return arg;
+/**
+ * Détermine le nom du dossier de sortie (Timestamp ou Current)
+ */
+function getOutputFolder() {
+    // Récupère les arguments passés au script
+    const args = process.argv.slice(2);
+    
+    // Si l'argument "save" est présent
+    if (args.includes('save')) {
+        const now = new Date();
+        const date = now.toISOString().split('T')[0];
+        // Remplacer les deux points par des tirets pour compatibilité Windows
+        const time = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+        return `version_${date}_${time}`;
     }
     
-    // Si "node script.js save" OU juste "node script.js" -> retourne "version_DATE_HEURE"
-    const now = new Date();
-    const date = now.toISOString().split('T')[0];
-    const time = now.toTimeString().split(' ')[0].replace(/:/g, '-');
-    return `version_${date}_${time}`;
+    return 'version_current';
 }
+
+// --- UTILITAIRES ---
 
 function ensureDirectory(dir) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -57,11 +72,13 @@ function getDocs(node) {
     }));
 }
 
-// --- ANALYSEURS ---
+// --- ANALYSEURS AST ---
 
+// Extrait propriétés et méthodes d'une Interface, Classe ou Type Literal
 function extractTypeMembers(node) {
     const properties = [];
     const methods = [];
+
     const members = node.getMembers ? node.getMembers() : [];
 
     members.forEach(member => {
@@ -87,9 +104,11 @@ function extractTypeMembers(node) {
             });
         }
     });
+
     return { properties, methods };
 }
 
+// Analyse le contenu d'une fonction (Body, variables, etc.)
 function processFunction(node, targetArray, name, modifiers = [], docs = [], loc = {}, originalSignature = null) {
     const params = node.getParameters().map(p => ({
         name: p.getName(),
@@ -155,6 +174,8 @@ function processFunction(node, targetArray, name, modifiers = [], docs = [], loc
     });
 }
 
+// --- COEUR DE L'ANALYSE ---
+
 function analyzeFile(sourceFile) {
     const filePath = sourceFile.getFilePath();
     
@@ -166,22 +187,32 @@ function analyzeFile(sourceFile) {
         },
         stats: { classes: 0, functions: 0, variables: 0, types: 0 },
         structure: {
-            imports: [], exports: [], classes: [], enums: [], types: [], interfaces: [], variables: [], functions: []
+            imports: [],
+            exports: [],
+            classes: [],
+            enums: [],
+            types: [],
+            interfaces: [],
+            variables: [],
+            functions: []
         }
     };
 
-    // IMPORTS
+    // 1. IMPORTS
     sourceFile.getImportDeclarations().forEach(imp => {
         data.structure.imports.push({
             module: imp.getModuleSpecifierValue(),
             default: imp.getDefaultImport() ? imp.getDefaultImport().getText() : null,
-            named: imp.getNamedImports().map(n => ({ name: n.getName(), alias: n.getAliasNode() ? n.getAliasNode().getText() : null })),
+            named: imp.getNamedImports().map(n => ({
+                name: n.getName(),
+                alias: n.getAliasNode() ? n.getAliasNode().getText() : null
+            })),
             text: imp.getText(),
             loc: getLoc(imp)
         });
     });
 
-    // EXPORTS
+    // 2. EXPORTS
     sourceFile.getExportDeclarations().forEach(exp => {
         data.structure.exports.push({
             module: exp.getModuleSpecifierValue(),
@@ -190,12 +221,15 @@ function analyzeFile(sourceFile) {
         });
     });
 
-    // TYPES & INTERFACES
+    // 3. TYPES & INTERFACES
     sourceFile.getTypeAliases().forEach(type => {
         data.stats.types++;
         const typeNode = type.getTypeNode();
         let members = { properties: [], methods: [] };
-        if (typeNode && Node.isTypeLiteral(typeNode)) members = extractTypeMembers(typeNode);
+
+        if (typeNode && Node.isTypeLiteral(typeNode)) {
+            members = extractTypeMembers(typeNode);
+        }
 
         data.structure.types.push({
             kind: 'TypeAlias',
@@ -212,6 +246,7 @@ function analyzeFile(sourceFile) {
     sourceFile.getInterfaces().forEach(int => {
         data.stats.types++;
         const members = extractTypeMembers(int);
+        
         data.structure.interfaces.push({
             kind: 'Interface',
             name: int.getName(),
@@ -225,20 +260,24 @@ function analyzeFile(sourceFile) {
         });
     });
 
-    // ENUMS
+    // 4. ENUMS
     sourceFile.getEnums().forEach(en => {
         data.structure.enums.push({
             name: en.getName(),
-            members: en.getMembers().map(m => ({ name: m.getName(), value: m.getValue() })),
+            members: en.getMembers().map(m => ({
+                name: m.getName(),
+                value: m.getValue()
+            })),
             modifiers: getModifiers(en),
             loc: getLoc(en)
         });
     });
 
-    // CLASSES
+    // 5. CLASSES
     sourceFile.getClasses().forEach(cls => {
         data.stats.classes++;
         const members = extractTypeMembers(cls);
+        
         data.structure.classes.push({
             name: cls.getName() || "Anonymous",
             extends: cls.getExtends() ? cls.getExtends().getText() : null,
@@ -252,12 +291,14 @@ function analyzeFile(sourceFile) {
         });
     });
 
-    // VARIABLES & FUNCTIONS
+    // 6. VARIABLES GLOBALES & HOCS
     sourceFile.getVariableStatements().forEach(stmt => {
         if (stmt.getParent().getKind() !== SyntaxKind.SourceFile) return;
+        
         stmt.getDeclarations().forEach(decl => {
             const name = decl.getName();
             const init = decl.getInitializer();
+            
             if (!init) return;
 
             let targetNode = null;
@@ -268,21 +309,34 @@ function analyzeFile(sourceFile) {
                 targetNode = init;
                 isFunctionLike = true;
                 customSignature = `${name} = ${init.getText().split('{')[0]}...`;
-            } else if (Node.isCallExpression(init)) {
+            }
+            else if (Node.isCallExpression(init)) {
                 const expr = init.getExpression();
                 const exprText = expr.getText();
-                if (['forwardRef', 'memo', 'React.forwardRef'].some(t => exprText.includes(t))) {
+                
+                if (['forwardRef', 'memo', 'React.forwardRef', 'React.memo'].some(t => exprText.includes(t))) {
                     const args = init.getArguments();
-                    if (args.length > 0 && (Node.isArrowFunction(args[0]) || Node.isFunctionExpression(args[0]))) {
-                        targetNode = args[0];
-                        isFunctionLike = true;
-                        customSignature = `${name} = ${exprText}(...)`;
+                    if (args.length > 0) {
+                        const firstArg = args[0];
+                        if (Node.isArrowFunction(firstArg) || Node.isFunctionExpression(firstArg)) {
+                            targetNode = firstArg;
+                            isFunctionLike = true;
+                            customSignature = `${name} = ${exprText}(...)`;
+                        }
                     }
                 }
             }
 
             if (isFunctionLike && targetNode) {
-                processFunction(targetNode, data.structure.functions, name, getModifiers(stmt), getDocs(stmt), getLoc(stmt), customSignature);
+                processFunction(
+                    targetNode, 
+                    data.structure.functions, 
+                    name, 
+                    getModifiers(stmt), 
+                    getDocs(stmt), 
+                    getLoc(stmt),
+                    customSignature
+                );
                 data.stats.functions++;
             } else {
                 data.stats.variables++;
@@ -300,24 +354,48 @@ function analyzeFile(sourceFile) {
         });
     });
 
-    // DEFAULT EXPORTS (HOCs)
+    // 7. EXPORT ASSIGNMENTS (Gère export default forwardRef(...))
     sourceFile.getExportAssignments().forEach(exp => {
         const expr = exp.getExpression();
+        
+        // On cherche des HOCs comme forwardRef, memo...
         if (Node.isCallExpression(expr)) {
-            const exprText = expr.getExpression().getText();
-            if (['forwardRef', 'memo'].some(t => exprText.includes(t))) {
+            const exprText = expr.getExpression().getText(); // "forwardRef"
+            
+            // Si c'est un HOC connu ou générique
+            if (['forwardRef', 'memo', 'React.forwardRef', 'React.memo'].some(t => exprText.includes(t))) {
                 const args = expr.getArguments();
                 if (args.length > 0) {
                     const innerComp = args[0];
-                    let compName = data.meta.fileName.split('.')[0];
-                    if (innerComp.getName && innerComp.getName()) compName = innerComp.getName();
-                    processFunction(innerComp, data.structure.functions, compName, ['export', 'default'], getDocs(exp.getParent()), getLoc(exp), `export default ${exprText}(...)`);
-                    data.stats.functions++;
+                    let compName = "AnonymousDefault";
+
+                    // On essaie de trouver le nom de la fonction interne : forwardRef(function Input() { ... })
+                    if (Node.isFunctionExpression(innerComp) || Node.isArrowFunction(innerComp)) {
+                        if (innerComp.getName && innerComp.getName()) {
+                            compName = innerComp.getName();
+                        } else {
+                            // Fallback : on essaie de deviner via le nom du fichier si anonyme
+                            compName = data.meta.fileName.split('.')[0]; 
+                        }
+
+                        // On l'ajoute comme une "Fonction" pour qu'il soit comparable
+                        processFunction(
+                            innerComp, 
+                            data.structure.functions, 
+                            compName, 
+                            ['export', 'default'], // On simule les modificateurs
+                            getDocs(exp.getParent()), // JSDoc souvent au dessus de l'export
+                            getLoc(exp),
+                            `export default ${exprText}(...)`
+                        );
+                        data.stats.functions++;
+                    }
                 }
             }
         }
     });
 
+    // 8. FONCTIONS CLASSIQUES
     sourceFile.getFunctions().forEach(fn => {
         data.stats.functions++;
         processFunction(fn, data.structure.functions, fn.getName(), getModifiers(fn), getDocs(fn), getLoc(fn));
@@ -326,19 +404,21 @@ function analyzeFile(sourceFile) {
     return data;
 }
 
+// --- MAIN ---
 async function main() {
-    console.log("🚀 Running DevTools Analysis...");
     const projectRoot = process.cwd();
-    
-    // 1. Récupération du dossier
+    const targetFolder = getTargetFolder();
     const folderName = getOutputFolder();
     const outputDir = path.join(projectRoot, OUTPUT_ROOT, folderName);
     
-    console.log(`📁 Target Output: ${outputDir}`);
+    console.log(`🚀 Analyse DevTools sur le dossier : ${targetFolder}`);
+    console.log(`📦 Dossier de sortie : ${folderName}`);
 
-    // Si on veut vraiment écraser "version_current", on nettoie
-    if (folderName === 'version_current' && fs.existsSync(outputDir)) {
-        fs.rmSync(outputDir, { recursive: true, force: true });
+    // Si c'est le dossier "current" (WIP), on nettoie avant pour éviter les fichiers orphelins
+    if (folderName === 'version_current') {
+        if (fs.existsSync(outputDir)) {
+            fs.rmSync(outputDir, { recursive: true, force: true });
+        }
     }
     
     ensureDirectory(outputDir);
@@ -348,37 +428,32 @@ async function main() {
         skipAddingFilesFromTsConfig: true,
     });
 
-    // 2. Vérification du chemin cible
-    const globPattern = `${TARGET_FOLDER}/**/*.{ts,tsx}`;
-    console.log(`🔍 Scanning pattern: ${globPattern}`);
-    
-    project.addSourceFilesAtPaths(globPattern);
+    project.addSourceFilesAtPaths(`${targetFolder}/**/*.{ts,tsx}`);
     const sourceFiles = project.getSourceFiles();
 
-    // [TAG:EMPTY_CHECK] Ajout d'une alerte si aucun fichier n'est trouvé
     if (sourceFiles.length === 0) {
-        console.error(`❌ AUCUN FICHIER TROUVÉ ! Vérifie que le dossier '${TARGET_FOLDER}' existe bien à la racine.`);
-        console.error(`   Racine actuelle : ${projectRoot}`);
-        return;
+        console.warn(`⚠️  ATTENTION: Aucun fichier trouvé dans ${targetFolder} ! Vérifiez votre arborescence.`);
     }
 
-    let count = 0;
     sourceFiles.forEach(sourceFile => {
         const relativePath = path.relative(projectRoot, sourceFile.getFilePath());
-        // Normalise les noms de fichiers pour l'OS
+        // Normalise les noms de fichiers pour l'OS (remplace les slashs par des underscores)
         const outputFileName = relativePath.split(path.sep).join('_').replace(/[\/\\]/g, '_') + '.json';
         const outputPath = path.join(outputDir, outputFileName);
         
         try {
             const analysisData = analyzeFile(sourceFile);
             fs.writeFileSync(outputPath, JSON.stringify(analysisData, null, 2));
-            count++;
         } catch (err) {
-            console.error(`❌ Error parsing ${relativePath}:`, err);
+            console.error(`❌ Erreur parsing ${relativePath}:`, err);
         }
     });
     
-    console.log(`✅ Snapshot saved in: ${outputDir} (${count} files processed)`);
+    if (folderName === 'version_current') {
+        console.log(`📝 Snapshot TEMPORAIRE mis à jour.`);
+    } else {
+        console.log(`✅ Snapshot SAUVEGARDÉ : /${folderName}`);
+    }
 }
 
 main().catch(console.error);
