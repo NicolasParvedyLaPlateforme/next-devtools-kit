@@ -2,19 +2,25 @@ const { Project, SyntaxKind, Node } = require('ts-morph');
 const fs = require('fs');
 const path = require('path');
 
-// CONFIGURATION GÉNÉRIQUE
-const TARGET_FOLDER = 'app'; // Scanne tout le dossier app par défaut
-const OUTPUT_ROOT = 'devtools_data/composition'; // Dossier de sortie isolé
+// --- CONFIGURATION ---
+// [TAG:CONFIG] Vérifie bien que ce dossier 'app' existe à la racine d'où tu lances la commande
+const TARGET_FOLDER = 'app'; 
+const OUTPUT_ROOT = 'devtools_data/composition';
 
+// [TAG:LOGIC_FOLDER_NAME] Correction: Comportement par défaut = Date (comme Meurise)
 function getOutputFolder() {
-    // Si argument "save" passé, on crée une version datée, sinon "current"
-    if (process.argv[2] === 'save') {
-        const now = new Date();
-        const date = now.toISOString().split('T')[0];
-        const time = now.toTimeString().split(' ')[0].replace(/:/g, '-');
-        return `version_${date}_${time}`;
+    const arg = process.argv[2];
+
+    // Si on lance "node script.js v1.0" -> retourne "v1.0"
+    if (arg && arg !== 'save') {
+        return arg;
     }
-    return 'version_current';
+    
+    // Si "node script.js save" OU juste "node script.js" -> retourne "version_DATE_HEURE"
+    const now = new Date();
+    const date = now.toISOString().split('T')[0];
+    const time = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+    return `version_${date}_${time}`;
 }
 
 function ensureDirectory(dir) {
@@ -323,9 +329,14 @@ function analyzeFile(sourceFile) {
 async function main() {
     console.log("🚀 Running DevTools Analysis...");
     const projectRoot = process.cwd();
+    
+    // 1. Récupération du dossier
     const folderName = getOutputFolder();
     const outputDir = path.join(projectRoot, OUTPUT_ROOT, folderName);
     
+    console.log(`📁 Target Output: ${outputDir}`);
+
+    // Si on veut vraiment écraser "version_current", on nettoie
     if (folderName === 'version_current' && fs.existsSync(outputDir)) {
         fs.rmSync(outputDir, { recursive: true, force: true });
     }
@@ -337,9 +348,21 @@ async function main() {
         skipAddingFilesFromTsConfig: true,
     });
 
-    project.addSourceFilesAtPaths(`${TARGET_FOLDER}/**/*.{ts,tsx}`);
+    // 2. Vérification du chemin cible
+    const globPattern = `${TARGET_FOLDER}/**/*.{ts,tsx}`;
+    console.log(`🔍 Scanning pattern: ${globPattern}`);
+    
+    project.addSourceFilesAtPaths(globPattern);
     const sourceFiles = project.getSourceFiles();
 
+    // [TAG:EMPTY_CHECK] Ajout d'une alerte si aucun fichier n'est trouvé
+    if (sourceFiles.length === 0) {
+        console.error(`❌ AUCUN FICHIER TROUVÉ ! Vérifie que le dossier '${TARGET_FOLDER}' existe bien à la racine.`);
+        console.error(`   Racine actuelle : ${projectRoot}`);
+        return;
+    }
+
+    let count = 0;
     sourceFiles.forEach(sourceFile => {
         const relativePath = path.relative(projectRoot, sourceFile.getFilePath());
         // Normalise les noms de fichiers pour l'OS
@@ -349,12 +372,13 @@ async function main() {
         try {
             const analysisData = analyzeFile(sourceFile);
             fs.writeFileSync(outputPath, JSON.stringify(analysisData, null, 2));
+            count++;
         } catch (err) {
             console.error(`❌ Error parsing ${relativePath}:`, err);
         }
     });
     
-    console.log(`✅ Snapshot saved in: ${outputDir}`);
+    console.log(`✅ Snapshot saved in: ${outputDir} (${count} files processed)`);
 }
 
 main().catch(console.error);
