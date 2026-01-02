@@ -1,6 +1,9 @@
 {
   "name": "next-devtools-kit",
   "version": "1.0.0",
+  "bin": {
+    "next-devtools-kit": "./scripts/init.js"
+  },
   "private": false, 
   "main": "index.ts",
   "exports": {
