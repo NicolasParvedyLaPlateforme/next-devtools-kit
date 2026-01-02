@@ -1,7 +1,14 @@
 {
   "name": "next-devtools-kit",
   "version": "1.0.0",
-  "private": true,
+  "private": false, 
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./api/*": "./app/api/*.ts",
+    "./devtools/*": "./app/devtools/*.tsx",
+    "./scripts/*": "./scripts/*.js"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
