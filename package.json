@@ -1,43 +1,43 @@
 {
   "name": "next-devtools-kit",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "private": false,
   "bin": {
     "next-devtools-kit": "./scripts/init.js"
   },
-  "private": false, 
-  "main": "index.ts",
+  "files": [
+    "app",
+    "scripts",
+    "package.json"
+  ],
   "exports": {
-    ".": "./index.ts",
-    "./api/*": "./app/api/*.ts",
-    "./devtools/*": "./app/devtools/*.tsx",
+    "./package.json": "./package.json",
     "./scripts/*": "./scripts/*.js",
-    "./app/*": "./app/*",
-    "./package.json": "./package.json"
+    "./app/*": "./app/*"
+  },
+  "typesVersions": {
+    "*": {
+      "app/*": [
+        "./app/*"
+      ]
+    }
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "audit": "node scripts/analyze_structure.js",
-    "audit:save": "node scripts/analyze_structure.js save"
+    "audit": "node scripts/analyze_structure.js"
+  },
+  "peerDependencies": {
+    "next": ">=14.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
   },
   "dependencies": {
     "lucide-react": "^0.300.0",
-    "next": "14.1.0",
-    "react": "^18",
-    "react-dom": "^18",
     "ts-morph": "^21.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "autoprefixer": "^10.0.1",
-    "eslint": "^8",
-    "eslint-config-next": "14.1.0",
-    "postcss": "^8",
-    "tailwindcss": "^3.3.0",
     "typescript": "^5"
   }
 }
